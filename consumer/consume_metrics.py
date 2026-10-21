@@ -1,18 +1,17 @@
 import json
-import os
 import signal
 import sys
-from pathlib import Path
 
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_FILE = PROJECT_ROOT / "data" / "landed" / "order_metrics_landed.jsonl"
-
-TOPIC = "order_metrics"
-BOOTSTRAP_SERVERS = os.getenv("BS", "localhost:9092")
-GROUP_ID = os.getenv("KAFKA_GROUP_ID", "vm1-metrics-consumer")
+from config.settings import (
+    BS,
+    KAFKA_AUTO_OFFSET_RESET,
+    KAFKA_GROUP_ID,
+    METRICS_LANDED_FILE,
+    METRICS_TOPIC,
+)
 
 running = True
 
@@ -25,7 +24,7 @@ def stop_consumer(signum, frame):
 def main():
     global running
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    METRICS_LANDED_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     signal.signal(signal.SIGINT, stop_consumer)
     signal.signal(signal.SIGTERM, stop_consumer)
@@ -35,35 +34,31 @@ def main():
 
     try:
         consumer = KafkaConsumer(
-            TOPIC,
-            bootstrap_servers=BOOTSTRAP_SERVERS.split(","),
-            group_id=GROUP_ID,
-            auto_offset_reset="earliest",
+            METRICS_TOPIC,
+            bootstrap_servers=BS.split(","),
+            group_id=KAFKA_GROUP_ID,
+            auto_offset_reset=KAFKA_AUTO_OFFSET_RESET,
             enable_auto_commit=False,
-            key_deserializer=lambda key: (
-                key.decode("utf-8") if key is not None else None
-            ),
             consumer_timeout_ms=None,
         )
 
-        # Append so restarting the consumer does not erase previous output.
-        with OUTPUT_FILE.open("a", encoding="utf-8") as output:
-            print(f"Consuming topic: {TOPIC}")
-            print(f"Bootstrap servers: {BOOTSTRAP_SERVERS}")
-            print(f"Output file: {OUTPUT_FILE}")
-            print("Press Ctrl+C to stop.")
+        print(f"Topic: {METRICS_TOPIC}")
+        print(f"Bootstrap servers: {BS}")
+        print(f"Consumer group: {KAFKA_GROUP_ID}")
+        print(f"Output file: {METRICS_LANDED_FILE}")
+        print("Consumer is running. Press Ctrl+C to stop.")
 
+        with METRICS_LANDED_FILE.open("a", encoding="utf-8") as output:
             while running:
-                records = consumer.poll(timeout_ms=1000)
+                batches = consumer.poll(timeout_ms=1000)
 
-                for _, messages in records.items():
+                for _, messages in batches.items():
                     for message in messages:
                         if not running:
                             break
 
                         try:
-                            raw_value = message.value.decode("utf-8")
-                            record = json.loads(raw_value)
+                            record = json.loads(message.value.decode("utf-8"))
 
                             if not isinstance(record, dict):
                                 print("Skipping non-object JSON message.")
@@ -77,9 +72,8 @@ def main():
 
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             print("Skipping invalid JSON message.")
-                            continue
 
-                # Commit offsets only after successfully processing the polled batch.
+                # Commit after processing the polled batch.
                 consumer.commit()
 
     except KafkaError as exc:

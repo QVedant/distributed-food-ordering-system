@@ -60,3 +60,46 @@ Copy `config/.env.example` to `.env` when local environment-file loading is impl
 
 ## Status
 VM1 implementation is in progress. Functional testing and distributed integration will be performed after all components are implemented.
+
+
+
+
+## Local Setup
+
+### 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd Assignment2
+```
+
+### 2. Create your environment file
+
+Copy the shared template to the project root:
+
+```bash
+cp config/.env.example .env
+```
+
+Edit `.env` and configure the values for your VM and deployment environment.
+
+- For local development, use `DEPLOYMENT_MODE=local` and `BS=localhost:9092`.
+- For team integration, use `DEPLOYMENT_MODE=team` and set `BS` to the reachable Kafka broker address on the ZeroTier network.
+- Fill in the VM ZeroTier IP addresses when they become available.
+
+### 3. Create and activate a Python environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 4. Install Python dependencies
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 5. Check the configuration
+
+The application loads `.env` through `config/settings.py`. Keep your personal `.env` out of Git and commit changes to `.env.example` when shared configuration defaults change.

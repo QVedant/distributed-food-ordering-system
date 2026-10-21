@@ -1,79 +1,99 @@
-import os
+import json
 import sys
-from pathlib import Path
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INPUT_FILE = PROJECT_ROOT / "order.jsonl"
-TOPIC = "orders"
+from config.settings import (
+    BS,
+    KAFKA_ACKS,
+    ORDERS_INPUT_FILE,
+    ORDERS_TOPIC,
+)
 
-BOOTSTRAP_SERVERS = os.getenv("BS", "localhost:9092")
 
-
-def extract_order_id(raw_line):
-    """Extract an order ID for the Kafka key when the JSON is valid."""
-    import json
-
-    try:
-        record = json.loads(raw_line)
-        if isinstance(record, dict) and record.get("order_id") is not None:
-            return str(record["order_id"])
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    return None
+def json_serializer(record):
+    return json.dumps(
+        record, separators=(",", ":")
+    ).encode("utf-8")
 
 
 def main():
-    if not INPUT_FILE.is_file():
-        print(f"Input dataset not found: {INPUT_FILE}", file=sys.stderr)
+    if not ORDERS_INPUT_FILE.is_file():
+        print(f"Input dataset not found: {ORDERS_INPUT_FILE}")
         sys.exit(1)
 
-    producer = KafkaProducer(
-        bootstrap_servers=BOOTSTRAP_SERVERS.split(","),
-        acks="all",
-        retries=5,
-    )
-
+    producer = None
     sent = 0
     failed = 0
+    skipped = 0
 
     try:
-        with INPUT_FILE.open("r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                raw_line = line.strip()
+        producer = KafkaProducer(
+            bootstrap_servers=BS.split(","),
+            value_serializer=json_serializer,
+            key_serializer=lambda key: (
+                key.encode("utf-8") if key is not None else None
+            ),
+            acks=KAFKA_ACKS,
+            retries=5,
+        )
 
-                if not raw_line:
+        print(f"Input file: {ORDERS_INPUT_FILE}")
+        print(f"Topic: {ORDERS_TOPIC}")
+        print(f"Bootstrap servers: {BS}")
+
+        with ORDERS_INPUT_FILE.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                line = line.strip()
+
+                if not line:
                     continue
 
-                key = extract_order_id(raw_line)
-                key_bytes = key.encode("utf-8") if key else None
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    print(
+                        f"Skipping malformed JSON at line {line_number}"
+                    )
+                    skipped += 1
+                    continue
+
+                if not isinstance(record, dict):
+                    print(
+                        f"Skipping non-object JSON at line {line_number}"
+                    )
+                    skipped += 1
+                    continue
+
+                order_id = record.get("order_id")
+                key = str(order_id) if order_id is not None else None
 
                 try:
                     producer.send(
-                        TOPIC,
-                        key=key_bytes,
-                        value=raw_line.encode("utf-8"),
+                        ORDERS_TOPIC,
+                        key=key,
+                        value=record,
                     ).get(timeout=30)
                     sent += 1
-
                 except (KafkaError, TimeoutError) as exc:
-                    failed += 1
                     print(
-                        f"Failed to publish line {line_number}: {exc}",
-                        file=sys.stderr,
+                        f"Failed to publish line {line_number}: {exc}"
                     )
+                    failed += 1
 
         producer.flush()
 
-    finally:
-        producer.close()
+    except KafkaError as exc:
+        print(f"Kafka connection or publishing error: {exc}")
+        sys.exit(1)
 
-    print(f"Topic: {TOPIC}")
-    print(f"Bootstrap servers: {BOOTSTRAP_SERVERS}")
+    finally:
+        if producer is not None:
+            producer.close()
+
     print(f"Records published: {sent}")
+    print(f"Records skipped: {skipped}")
     print(f"Records failed: {failed}")
 
     if failed:
