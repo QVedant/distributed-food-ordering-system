@@ -82,6 +82,7 @@ def main():
     spark = (
         SparkSession.builder
         .appName("VM1-Operations-Analytics")
+        .config("spark.hadoop.fs.defaultFS", "file:///")
         .getOrCreate()
     )
 
