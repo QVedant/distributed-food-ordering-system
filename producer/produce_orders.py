@@ -1,5 +1,3 @@
-
-import json
 import os
 import sys
 from pathlib import Path
@@ -14,19 +12,27 @@ TOPIC = "orders"
 BOOTSTRAP_SERVERS = os.getenv("BS", "localhost:9092")
 
 
-def json_serializer(record):
-    return json.dumps(record, separators=(",", ":")).encode("utf-8")
+def extract_order_id(raw_line):
+    """Extract an order ID for the Kafka key when the JSON is valid."""
+    import json
+
+    try:
+        record = json.loads(raw_line)
+        if isinstance(record, dict) and record.get("order_id") is not None:
+            return str(record["order_id"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return None
 
 
 def main():
     if not INPUT_FILE.is_file():
-        print(f"ERROR: Input file not found: {INPUT_FILE}", file=sys.stderr)
+        print(f"Input dataset not found: {INPUT_FILE}", file=sys.stderr)
         sys.exit(1)
 
     producer = KafkaProducer(
         bootstrap_servers=BOOTSTRAP_SERVERS.split(","),
-        value_serializer=json_serializer,
-        key_serializer=lambda key: key.encode("utf-8"),
         acks="all",
         retries=5,
     )
@@ -37,46 +43,38 @@ def main():
     try:
         with INPUT_FILE.open("r", encoding="utf-8") as file:
             for line_number, line in enumerate(file, start=1):
-                line = line.strip()
-                if not line:
+                raw_line = line.strip()
+
+                if not raw_line:
                     continue
+
+                key = extract_order_id(raw_line)
+                key_bytes = key.encode("utf-8") if key else None
 
                 try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    print(
-                        f"Skipping malformed JSON at line {line_number}: {exc}",
-                        file=sys.stderr,
-                    )
-                    failed += 1
-                    continue
-
-                if not isinstance(record, dict):
-                    print(
-                        f"Skipping non-object JSON at line {line_number}",
-                        file=sys.stderr,
-                    )
-                    failed += 1
-                    continue
-
-                order_id = record.get("order_id")
-                key = str(order_id) if order_id is not None else None
-
-                try:
-                    producer.send(TOPIC, key=key, value=record).get(timeout=30)
+                    producer.send(
+                        TOPIC,
+                        key=key_bytes,
+                        value=raw_line.encode("utf-8"),
+                    ).get(timeout=30)
                     sent += 1
+
                 except (KafkaError, TimeoutError) as exc:
+                    failed += 1
                     print(
                         f"Failed to publish line {line_number}: {exc}",
                         file=sys.stderr,
                     )
-                    failed += 1
 
         producer.flush()
+
     finally:
         producer.close()
 
-    print(f"Producer finished. Published: {sent}; skipped/failed: {failed}")
+    print(f"Topic: {TOPIC}")
+    print(f"Bootstrap servers: {BOOTSTRAP_SERVERS}")
+    print(f"Records published: {sent}")
+    print(f"Records failed: {failed}")
 
     if failed:
         sys.exit(1)

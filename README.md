@@ -3,10 +3,29 @@
 ## Project Overview
 A distributed food-ordering analytics pipeline using Apache Kafka, KRaft, Apache Spark, and ZeroTier across four virtual machines.
 
-## VM1 Responsibilities
-- Producer 1: Publish raw orders to the Kafka `orders` topic.
-- Consumer 2: Consume enriched records from `order_metrics` and save them locally.
-- Spark Job 2: Generate restaurant and city analytics CSV files from the local landed data.
+## VM1 — Assigned Responsibilities
+
+### Producer 1
+- Reads the original `order.jsonl` dataset.
+- Publishes raw records to Kafka topic `orders`.
+- Uses the `BS` environment variable for the Kafka bootstrap address.
+
+### Consumer 2
+- Consumes enriched records from Kafka topic `order_metrics`.
+- Saves received records to `data/landed/order_metrics_landed.jsonl`.
+
+### Spark Job 2 — Operations Analytics
+- Reads the locally landed metrics file.
+- Generates `restaurant_summary.csv` with restaurant-level statistics.
+- Generates `city_summary.csv` with city-level statistics.
+- Rounds calculated numerical values to two decimal places.
+
+### Integration Dependencies
+- VM2 hosts Kafka Broker 1 and the KRaft controller.
+- VM3 hosts Kafka Broker 2.
+- VM4 consumes raw orders, runs Spark Job 1, and publishes enriched records.
+- VM1 and VM4 must use the same Kafka cluster through ZeroTier.
+
 
 ## Project Structure
 - `producer/produce_orders.py` — Raw order producer.
