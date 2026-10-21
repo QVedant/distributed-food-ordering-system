@@ -1,0 +1,14 @@
+
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.env
+
+data/landed/*
+data/processed/*
+restaurant_summary.csv
+city_summary.csv
+
+!data/landed/.gitkeep
+!data/processed/.gitkeep
