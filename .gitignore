@@ -12,3 +12,6 @@ city_summary.csv
 
 !data/landed/.gitkeep
 !data/processed/.gitkeep
+
+config/kafka-vm2.properties
+config/kafka-vm3.properties
