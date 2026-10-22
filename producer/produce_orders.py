@@ -1,6 +1,5 @@
 import sys
-import json
-
+import js
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 

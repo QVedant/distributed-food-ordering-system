@@ -1,9 +1,14 @@
 import json
 import signal
 import sys
+from pathlib import Path
 
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
     BS,
@@ -24,7 +29,10 @@ def stop_consumer(signum, frame):
 def main():
     global running
 
-    METRICS_LANDED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    METRICS_LANDED_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     signal.signal(signal.SIGINT, stop_consumer)
     signal.signal(signal.SIGTERM, stop_consumer)
@@ -48,7 +56,10 @@ def main():
         print(f"Output file: {METRICS_LANDED_FILE}")
         print("Consumer is running. Press Ctrl+C to stop.")
 
-        with METRICS_LANDED_FILE.open("a", encoding="utf-8") as output:
+        with METRICS_LANDED_FILE.open(
+            "a",
+            encoding="utf-8",
+        ) as output:
             while running:
                 batches = consumer.poll(timeout_ms=1000)
 
@@ -58,26 +69,39 @@ def main():
                             break
 
                         try:
-                            record = json.loads(message.value.decode("utf-8"))
+                            record = json.loads(
+                                message.value.decode("utf-8")
+                            )
 
                             if not isinstance(record, dict):
-                                print("Skipping non-object JSON message.")
+                                print(
+                                    "Skipping non-object JSON message."
+                                )
                                 continue
 
                             output.write(
-                                json.dumps(record, separators=(",", ":")) + "\n"
+                                json.dumps(
+                                    record,
+                                    separators=(",", ":"),
+                                )
+                                + "\n"
                             )
                             output.flush()
                             count += 1
 
-                        except (UnicodeDecodeError, json.JSONDecodeError):
+                        except (
+                            UnicodeDecodeError,
+                            json.JSONDecodeError,
+                        ):
                             print("Skipping invalid JSON message.")
 
-                # Commit after processing the polled batch.
                 consumer.commit()
 
     except KafkaError as exc:
-        print(f"Kafka consumer error: {exc}", file=sys.stderr)
+        print(
+            f"Kafka consumer error: {exc}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     finally:

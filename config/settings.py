@@ -42,7 +42,8 @@ ORDERS_INPUT_FILE = PROJECT_ROOT / get_setting(
     "ORDERS_INPUT_FILE", "order.jsonl"
 )
 ORDERS_LANDED_FILE = PROJECT_ROOT / get_setting(
-    "ORDERS_LANDED_FILE", "data/landed/orders_landed.jsonl"
+    "ORDERS_LANDED_FILE",
+    "data/landed/orders_landed.jsonl",
 )
 METRICS_LANDED_FILE = PROJECT_ROOT / get_setting(
     "METRICS_LANDED_FILE",
