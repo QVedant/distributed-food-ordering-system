@@ -1,8 +1,14 @@
-import json
 import sys
+import json
 
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
     BS,
@@ -10,12 +16,6 @@ from config.settings import (
     ORDERS_INPUT_FILE,
     ORDERS_TOPIC,
 )
-
-
-def json_serializer(record):
-    return json.dumps(
-        record, separators=(",", ":")
-    ).encode("utf-8")
 
 
 def main():
@@ -31,10 +31,10 @@ def main():
     try:
         producer = KafkaProducer(
             bootstrap_servers=BS.split(","),
-            value_serializer=json_serializer,
             key_serializer=lambda key: (
                 key.encode("utf-8") if key is not None else None
             ),
+            value_serializer=lambda value: value.encode("utf-8"),
             acks=KAFKA_ACKS,
             retries=5,
         )
@@ -45,35 +45,28 @@ def main():
 
         with ORDERS_INPUT_FILE.open("r", encoding="utf-8") as file:
             for line_number, line in enumerate(file, start=1):
-                line = line.strip()
+                line = line.rstrip("\r\n")
 
-                if not line:
+                if not line.strip():
+                    skipped += 1
                     continue
+
+                key = None
 
                 try:
                     record = json.loads(line)
+                    if isinstance(record, dict):
+                        order_id = record.get("order_id")
+                        if order_id is not None:
+                            key = str(order_id)
                 except json.JSONDecodeError:
-                    print(
-                        f"Skipping malformed JSON at line {line_number}"
-                    )
-                    skipped += 1
-                    continue
-
-                if not isinstance(record, dict):
-                    print(
-                        f"Skipping non-object JSON at line {line_number}"
-                    )
-                    skipped += 1
-                    continue
-
-                order_id = record.get("order_id")
-                key = str(order_id) if order_id is not None else None
+                    pass
 
                 try:
                     producer.send(
                         ORDERS_TOPIC,
                         key=key,
-                        value=record,
+                        value=line,
                     ).get(timeout=30)
                     sent += 1
                 except (KafkaError, TimeoutError) as exc:
@@ -85,7 +78,7 @@ def main():
         producer.flush()
 
     except KafkaError as exc:
-        print(f"Kafka connection or publishing error: {exc}")
+        print(f"Kafka connection or publishing error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     finally:
@@ -93,7 +86,7 @@ def main():
             producer.close()
 
     print(f"Records published: {sent}")
-    print(f"Records skipped: {skipped}")
+    print(f"Blank lines skipped: {skipped}")
     print(f"Records failed: {failed}")
 
     if failed:
