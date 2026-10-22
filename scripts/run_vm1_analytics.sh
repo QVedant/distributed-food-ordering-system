@@ -8,6 +8,12 @@ if [[ -z "${SPARK_HOME:-}" ]]; then
     exit 1
 fi
 
+if [[ ! -x "$SPARK_HOME/bin/spark-submit" ]]; then
+    echo "Error: spark-submit not found or not executable at:"
+    echo "  $SPARK_HOME/bin/spark-submit"
+    exit 1
+fi
+
 if [[ ! -f "$PROJECT_ROOT/.env" ]]; then
     echo "Error: .env file not found."
     echo "Create it with: cp config/.env.example .env"
@@ -32,6 +38,10 @@ if [[ ! -f "$INPUT_FILE" ]]; then
 fi
 
 mkdir -p "$PROJECT_ROOT/data/processed"
+
+echo "Running Spark Job 2"
+echo "Metrics input: $INPUT_FILE"
+echo "Spark master: $SPARK_MASTER"
 
 "$SPARK_HOME/bin/spark-submit" \
     --master "$SPARK_MASTER" \

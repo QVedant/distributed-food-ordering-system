@@ -5,10 +5,13 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Resetting generated VM1 outputs..."
 
-if pgrep -af '[c]onsume_metrics.py' >/dev/null; then
-    echo "Stop consume_metrics.py before resetting outputs."
-    exit 1
-fi
+for process in consume_metrics.py consume_orders.py job1_delivery_metrics.py job2_operations_analytics.py; do
+    if pgrep -f "[/]$process" >/dev/null; then
+        echo "Stop $process before resetting outputs."
+        exit 1
+    fi
+done
+
 
 find "$PROJECT_ROOT/data/landed" \
     -maxdepth 1 -type f \

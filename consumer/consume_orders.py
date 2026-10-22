@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
-    BS,
+    BOOTSTRAP_SERVERS,
     KAFKA_AUTO_OFFSET_RESET,
     ORDERS_LANDED_FILE,
     ORDERS_TOPIC,
@@ -39,29 +39,23 @@ def main():
     try:
         consumer = KafkaConsumer(
             ORDERS_TOPIC,
-            bootstrap_servers=BS.split(","),
+            bootstrap_servers=BOOTSTRAP_SERVERS,
             group_id="vm4-orders-consumer",
             auto_offset_reset=KAFKA_AUTO_OFFSET_RESET,
             enable_auto_commit=False,
         )
 
         print(f"Topic: {ORDERS_TOPIC}")
-        print(f"Bootstrap servers: {BS}")
+        print(f"Bootstrap servers: {', '.join(BOOTSTRAP_SERVERS)}")
         print(f"Output file: {ORDERS_LANDED_FILE}")
         print("Consumer running. Press Ctrl+C to stop.")
 
-        with ORDERS_LANDED_FILE.open(
-            "a",
-            encoding="utf-8",
-        ) as output:
+        with ORDERS_LANDED_FILE.open("a", encoding="utf-8") as output:
             while running:
                 batches = consumer.poll(timeout_ms=1000)
 
                 for _, messages in batches.items():
                     for message in messages:
-                        if not running:
-                            break
-
                         output.write(
                             message.value.decode(
                                 "utf-8",
@@ -69,10 +63,15 @@ def main():
                             )
                             + "\n"
                         )
-                        output.flush()
                         count += 1
 
-                consumer.commit()
+                output.flush()
+
+                if not running:
+                    break
+
+                if batches:
+                    consumer.commit()
 
     except KafkaError as exc:
         print(f"Kafka consumer error: {exc}", file=sys.stderr)

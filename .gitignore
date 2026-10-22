@@ -15,3 +15,9 @@ city_summary.csv
 
 config/kafka-vm2.properties
 config/kafka-vm3.properties
+
+.vscode/
+
+spark-warehouse/
+metastore_db/
+derby.log

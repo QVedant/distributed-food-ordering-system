@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
-    BS,
+    BOOTSTRAP_SERVERS,
     KAFKA_AUTO_OFFSET_RESET,
     KAFKA_GROUP_ID,
     METRICS_LANDED_FILE,
@@ -28,6 +28,7 @@ def stop_consumer(signum, frame):
 
 def main():
     global running
+    running = True
 
     METRICS_LANDED_FILE.parent.mkdir(
         parents=True,
@@ -43,15 +44,14 @@ def main():
     try:
         consumer = KafkaConsumer(
             METRICS_TOPIC,
-            bootstrap_servers=BS.split(","),
+            bootstrap_servers=BOOTSTRAP_SERVERS,
             group_id=KAFKA_GROUP_ID,
             auto_offset_reset=KAFKA_AUTO_OFFSET_RESET,
             enable_auto_commit=False,
-            consumer_timeout_ms=None,
         )
 
         print(f"Topic: {METRICS_TOPIC}")
-        print(f"Bootstrap servers: {BS}")
+        print(f"Bootstrap servers: {', '.join(BOOTSTRAP_SERVERS)}")
         print(f"Consumer group: {KAFKA_GROUP_ID}")
         print(f"Output file: {METRICS_LANDED_FILE}")
         print("Consumer is running. Press Ctrl+C to stop.")
@@ -65,9 +65,6 @@ def main():
 
                 for _, messages in batches.items():
                     for message in messages:
-                        if not running:
-                            break
-
                         try:
                             record = json.loads(
                                 message.value.decode("utf-8")
@@ -86,7 +83,6 @@ def main():
                                 )
                                 + "\n"
                             )
-                            output.flush()
                             count += 1
 
                         except (
@@ -95,11 +91,15 @@ def main():
                         ):
                             print("Skipping invalid JSON message.")
 
-                consumer.commit()
+                # Flush landed records before committing their offsets.
+                output.flush()
 
-    except KafkaError as exc:
+                if batches and running:
+                    consumer.commit()
+
+    except (KafkaError, OSError) as exc:
         print(
-            f"Kafka consumer error: {exc}",
+            f"Metrics consumer failed: {exc}",
             file=sys.stderr,
         )
         sys.exit(1)

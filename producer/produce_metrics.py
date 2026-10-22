@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
-    BS,
+    BOOTSTRAP_SERVERS,
     KAFKA_ACKS,
     METRICS_PROCESSED_FILE,
     METRICS_TOPIC,
@@ -33,7 +33,7 @@ def main():
 
     try:
         producer = KafkaProducer(
-            bootstrap_servers=BS.split(","),
+            bootstrap_servers=BOOTSTRAP_SERVERS,
             key_serializer=lambda key: (
                 key.encode("utf-8") if key is not None else None
             ),
@@ -44,20 +44,21 @@ def main():
 
         print(f"Input file: {METRICS_PROCESSED_FILE}")
         print(f"Topic: {METRICS_TOPIC}")
-        print(f"Bootstrap servers: {BS}")
+        print(f"Bootstrap servers: {', '.join(BOOTSTRAP_SERVERS)}")
 
         with METRICS_PROCESSED_FILE.open(
             "r",
             encoding="utf-8",
         ) as file:
             for line_number, line in enumerate(file, start=1):
-                line = line.strip()
+                record_line = line.rstrip("\r\n")
 
-                if not line:
+                if not record_line.strip():
+                    skipped += 1
                     continue
 
                 try:
-                    record = json.loads(line)
+                    record = json.loads(record_line)
 
                     if not isinstance(record, dict):
                         skipped += 1
@@ -66,8 +67,11 @@ def main():
                     order_id = record.get("order_id")
                     key = str(order_id) if order_id is not None else None
 
-                except json.JSONDecodeError:
-                    print(f"Skipping invalid JSON at line {line_number}")
+                except (json.JSONDecodeError, TypeError):
+                    print(
+                        f"Skipping invalid JSON at line {line_number}",
+                        file=sys.stderr,
+                    )
                     skipped += 1
                     continue
 
@@ -75,13 +79,14 @@ def main():
                     producer.send(
                         METRICS_TOPIC,
                         key=key,
-                        value=line,
+                        value=record_line,
                     ).get(timeout=30)
                     sent += 1
 
                 except (KafkaError, TimeoutError) as exc:
                     print(
-                        f"Failed to publish line {line_number}: {exc}"
+                        f"Failed to publish line {line_number}: {exc}",
+                        file=sys.stderr,
                     )
                     failed += 1
 

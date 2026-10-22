@@ -1,16 +1,17 @@
 import sys
-import js
+import json
+from pathlib import Path
+
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
-from pathlib import Path
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import (
-    BS,
+    BOOTSTRAP_SERVERS,
     KAFKA_ACKS,
     ORDERS_INPUT_FILE,
     ORDERS_TOPIC,
@@ -19,7 +20,7 @@ from config.settings import (
 
 def main():
     if not ORDERS_INPUT_FILE.is_file():
-        print(f"Input dataset not found: {ORDERS_INPUT_FILE}")
+        print(f"Input dataset not found: {ORDERS_INPUT_FILE}", file=sys.stderr)
         sys.exit(1)
 
     producer = None
@@ -29,7 +30,7 @@ def main():
 
     try:
         producer = KafkaProducer(
-            bootstrap_servers=BS.split(","),
+            bootstrap_servers=BOOTSTRAP_SERVERS,
             key_serializer=lambda key: (
                 key.encode("utf-8") if key is not None else None
             ),
@@ -40,7 +41,7 @@ def main():
 
         print(f"Input file: {ORDERS_INPUT_FILE}")
         print(f"Topic: {ORDERS_TOPIC}")
-        print(f"Bootstrap servers: {BS}")
+        print(f"Bootstrap servers: {', '.join(BOOTSTRAP_SERVERS)}")
 
         with ORDERS_INPUT_FILE.open("r", encoding="utf-8") as file:
             for line_number, line in enumerate(file, start=1):
@@ -58,7 +59,7 @@ def main():
                         order_id = record.get("order_id")
                         if order_id is not None:
                             key = str(order_id)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, TypeError):
                     pass
 
                 try:
@@ -70,7 +71,8 @@ def main():
                     sent += 1
                 except (KafkaError, TimeoutError) as exc:
                     print(
-                        f"Failed to publish line {line_number}: {exc}"
+                        f"Failed to publish line {line_number}: {exc}",
+                        file=sys.stderr,
                     )
                     failed += 1
 

@@ -12,7 +12,10 @@ from pyspark.sql.functions import (
     round as spark_round,
     sum as spark_sum,
     when,
+    trim,
+    countDistinct,
 )
+
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -35,7 +38,6 @@ from config.settings import (
 INPUT_FILE = METRICS_LANDED_FILE
 RESTAURANT_OUTPUT = RESTAURANT_OUTPUT_FILE
 CITY_OUTPUT = CITY_OUTPUT_FILE
-OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 
 METRICS_SCHEMA = StructType([
     StructField("order_id", StringType(), True),
@@ -58,10 +60,11 @@ METRICS_SCHEMA = StructType([
 
 def write_single_csv(dataframe, output_file):
     output_file = Path(output_file)
-    temp_dir = OUTPUT_DIR / f"{output_file.stem}_spark_output"
-
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    temp_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_dir = output_file.parent / (
+        f"{output_file.stem}_spark_output"
+    )
 
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
@@ -78,13 +81,15 @@ def write_single_csv(dataframe, output_file):
     part_files = list(temp_dir.glob("part-*.csv"))
 
     if not part_files:
+        shutil.rmtree(temp_dir, ignore_errors=True)
         raise RuntimeError(
             f"No CSV part file generated for {output_file.name}"
         )
 
-    output_file.unlink(missing_ok=True)
-    shutil.move(str(part_files[0]), str(output_file))
-    shutil.rmtree(temp_dir)
+    try:
+        shutil.move(str(part_files[0]), str(output_file))
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def main():
@@ -95,13 +100,12 @@ def main():
         )
         sys.exit(1)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
     spark = (
         SparkSession.builder
         .appName("DistributedFoodOrdering-OperationsAnalytics")
         .master(SPARK_MASTER)
         .config("spark.hadoop.fs.defaultFS", "file:///")
+        .config("spark.sql.ansi.enabled", "false")
         .getOrCreate()
     )
 
@@ -110,9 +114,16 @@ def main():
     try:
         raw_data = spark.read.text(str(INPUT_FILE))
 
-        parsed_data = raw_data.select(
-            from_json(col("value"), METRICS_SCHEMA).alias("record")
-        ).select("record.*")
+        parsed_data = (
+            raw_data
+            .select(
+                from_json(
+                    col("value"),
+                    METRICS_SCHEMA,
+                ).alias("record")
+            )
+            .select("record.*")
+        )
 
         required_columns = [
             "order_id",
@@ -121,6 +132,7 @@ def main():
             "order_amount",
             "preparation_time_min",
             "delivery_time_min",
+            "delay_min",
             "delivery_status",
         ]
 
@@ -129,16 +141,54 @@ def main():
         )
 
         cleaned_data = cleaned_data.filter(
-            (col("order_id") != "")
-            & (col("restaurant_id") != "")
-            & (col("city") != "")
+            (trim(col("order_id")) != "")
+            & (trim(col("restaurant_id")) != "")
+            & (trim(col("city")) != "")
             & (col("order_amount") > 0)
             & (col("preparation_time_min") >= 0)
             & (col("delivery_time_min") >= 0)
+            & (col("delay_min") >= 0)
             & col("delivery_status").isin("ON_TIME", "DELAYED")
+            & (
+                (
+                    (col("delivery_status") == "ON_TIME")
+                    & (col("delay_min") == 0)
+                )
+                | (
+                    (col("delivery_status") == "DELAYED")
+                    & (col("delay_min") > 0)
+                )
+            )
         )
 
-        unique_orders = cleaned_data.dropDuplicates()
+        # Exclude conflicting records for an order ID.
+        order_variants = (
+            cleaned_data
+            .groupBy("order_id")
+            .agg(
+                countDistinct(
+                    "restaurant_id",
+                    "city",
+                    "order_amount",
+                    "preparation_time_min",
+                    "delivery_time_min",
+                    "delay_min",
+                    "delivery_status",
+                ).alias("variant_count")
+            )
+            .filter(col("variant_count") == 1)
+            .select("order_id")
+        )
+
+        unique_orders = (
+            cleaned_data
+            .join(
+                order_variants,
+                on="order_id",
+                how="inner",
+            )
+            .dropDuplicates(["order_id"])
+        )
 
         delayed_count = spark_sum(
             when(
@@ -219,8 +269,12 @@ def main():
             CITY_OUTPUT,
         )
 
-        print(f"Restaurant analytics saved to: {RESTAURANT_OUTPUT}")
-        print(f"City analytics saved to: {CITY_OUTPUT}")
+        print(
+            f"Restaurant analytics saved to: {RESTAURANT_OUTPUT}"
+        )
+        print(
+            f"City analytics saved to: {CITY_OUTPUT}"
+        )
 
     finally:
         spark.stop()
