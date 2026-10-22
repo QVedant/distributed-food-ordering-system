@@ -30,13 +30,19 @@ def main():
 
     try:
         producer = KafkaProducer(
-            bootstrap_servers=BOOTSTRAP_SERVERS,
+            bootstrap_servers=[
+                "192.168.195.21:9092",
+                "192.168.195.167:9092",
+            ],
             key_serializer=lambda key: (
                 key.encode("utf-8") if key is not None else None
             ),
             value_serializer=lambda value: value.encode("utf-8"),
-            acks=KAFKA_ACKS,
-            retries=5,
+            acks="all",
+            retries=10,
+            retry_backoff_ms=1000,
+            request_timeout_ms=30000,
+            max_block_ms=60000,
         )
 
         print(f"Input file: {ORDERS_INPUT_FILE}")
@@ -67,7 +73,7 @@ def main():
                         ORDERS_TOPIC,
                         key=key,
                         value=line,
-                    ).get(timeout=30)
+                    ).get(timeout=60)
                     sent += 1
                 except (KafkaError, TimeoutError) as exc:
                     print(
